@@ -151,11 +151,33 @@ func uploadcmd(opt Options) error {
 
 	vprintln("RESPONSE:", resp)
 	if resp.StatusCode != http.StatusCreated {
-		if msg, err := ToMessage(resp.Body); err == nil {
-			return fmt.Errorf("could not upload, status code (%v), %v",
-				resp.Status, msg)
+		if resp.StatusCode == http.StatusBadGateway {
+			//Verify if the upload is correct otherwise return the error
+			//Git is known to throw 502 error after the file upload
+			latest, err := LatestRelease(user, repo, token)
+			if err != nil {
+				return fmt.Errorf("Failed to get the latest release %s", err)
+			}
+			for _, asset := range latest.Assets {
+				if asset.Name == name {
+					contentLength, err := GetFileSize(file)
+					if err != nil {
+						return fmt.Errorf("Failed to get the file size %s", err)
+					}
+					if int64(asset.Size) != contentLength {
+						return fmt.Errorf("The uploaded file is corrupted remote file size = %v actual file size= %v",
+							int64(asset.Size), contentLength)
+					}
+				}
+			}
+			vprintln("Git error-ed out after the upload but the upload file is verified")
 		} else {
-			return fmt.Errorf("could not upload, status code (%v)", resp.Status)
+			if msg, err := ToMessage(resp.Body); err == nil {
+				return fmt.Errorf("could not upload, status code (%v), %v",
+					resp.Status, msg)
+			} else {
+				return fmt.Errorf("could not upload, status code (%v)", resp.Status)
+			}
 		}
 	}
 
